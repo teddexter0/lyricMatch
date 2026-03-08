@@ -20,15 +20,33 @@ export default function Home() {
     return () => clearInterval(t);
   }, []);
 
+  // Restore saved name from localStorage on mount
+  useEffect(() => {
+    const saved = typeof window !== 'undefined' && localStorage.getItem('lyricmatch_name');
+    if (saved) setPlayerName(saved);
+  }, []);
+
   // Firebase auth listener
   useEffect(() => {
     const unsub = onAuth((u) => {
       setUser(u);
-      if (u) setPlayerName(u.displayName || '');
+      // Only pre-fill from Google if the user hasn't manually set a name
+      const saved = typeof window !== 'undefined' && localStorage.getItem('lyricmatch_name');
+      if (u && !saved) setPlayerName(u.displayName || '');
       setAuthLoading(false);
     });
     return unsub;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  function handleNameChange(e) {
+    // Strip anything that's not a letter, space, apostrophe, or hyphen
+    let val = e.target.value.replace(/[^a-zA-Z\s'\-]/g, '');
+    // Auto-capitalize first letter
+    if (val.length > 0) val = val.charAt(0).toUpperCase() + val.slice(1);
+    setPlayerName(val);
+    if (typeof window !== 'undefined') localStorage.setItem('lyricmatch_name', val);
+  }
 
   function generateRoomId() {
     return Math.random().toString(36).slice(2, 8).toUpperCase();
@@ -71,6 +89,7 @@ export default function Home() {
               user ? (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                   {user.photoURL && (
+                    // eslint-disable-next-line @next/next/no-img-element
                     <img src={user.photoURL} alt="" style={{ width: 32, height: 32, borderRadius: '50%', border: '2px solid var(--accent-green)' }} />
                   )}
                   <span style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>{user.displayName}</span>
@@ -130,7 +149,7 @@ export default function Home() {
         </section>
 
         {/* ── Play card ── */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem', alignItems: 'start', maxWidth: 800, margin: '0 auto 4rem' }}>
+        <div className="play-grid">
 
           {/* Create / Join form */}
           <div className="glass-card" style={{ padding: '2rem' }}>
@@ -160,14 +179,15 @@ export default function Home() {
 
             {/* Player name */}
             <label style={{ fontSize: '0.85rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.4rem' }}>
-              Your name
+              Display name{user && <span style={{ color: 'var(--accent-green)', marginLeft: '0.4rem', fontSize: '0.75rem' }}>← edit me</span>}
             </label>
             <input
               className="lyric-input"
               style={{ marginBottom: '1rem' }}
-              placeholder={user ? user.displayName : 'Enter your name...'}
+              placeholder="Enter your name..."
               value={playerName}
-              onChange={(e) => setPlayerName(e.target.value)}
+              maxLength={20}
+              onChange={handleNameChange}
               onKeyDown={(e) => e.key === 'Enter' && handleStart()}
             />
 

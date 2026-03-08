@@ -1,71 +1,102 @@
 /**
- * Gemini-powered lyrics analysis.
- * Used server-side (in /pages/api/lyrics-match.js) only — API key stays private.
+ * Gemini-powered lyrics analysis — server-side only, API key stays private.
+ * Uses gemini-2.0-flash (fastest free model, massive music knowledge).
  */
 
-/**
- * Ask Gemini to identify a song from a lyric fragment + artist hint,
- * and return a structured confidence report.
- *
- * @param {object} params
- * @param {string} params.lyricFragment - What the user typed (lyric line/phrase)
- * @param {string} params.artistHint    - Artist name the user supplied
- * @param {string} params.promptWord    - The game's current prompt word (must appear in lyrics)
- * @returns {Promise<{
- *   songTitle: string|null,
- *   confirmedArtist: string|null,
- *   confidence: number,       // 0–100
- *   lyricMatch: boolean,
- *   wordMatch: boolean,       // does the lyric contain the prompt word?
- *   reasoning: string,
- *   spotifyQuery: string,     // pre-built query for Spotify search
- * }>}
- */
-export async function analyzeLyric({ lyricFragment, artistHint, promptWord }) {
+export async function analyzeLyric({ lyricFragment, artistHint, songTitleHint, promptWord }) {
   const { GoogleGenerativeAI } = await import('@google/generative-ai');
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-  const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
-  const systemPrompt = `You are a music expert with encyclopedic knowledge of songs and lyrics
-across all genres and eras (1950s–2025). Your job is to analyze a lyric fragment submitted by
-a player in a music trivia game.
+  const songHintLine = songTitleHint
+    ? `Song title hint (extracted from player's input): "${songTitleHint}"`
+    : '';
 
-GAME RULES FOR CONTEXT:
-- The current prompt word is: "${promptWord}" (starting with letter "${promptWord[0].toUpperCase()}")
-- The player typed a lyric fragment they believe comes from a real song
-- The player also named an artist they believe sang/recorded this song
-- You must assess how legitimate their submission is
+  const prompt = `You are a world-class music scholar with encyclopedic knowledge of every genre and era:
+pop, hip-hop, R&B, soul, rock, punk, metal, indie, folk, country, EDM, house, techno,
+reggae, dancehall, afrobeats, amapiano, highlife, bongo flava, soca, latin (reggaeton,
+cumbia, bachata, salsa), K-pop, J-pop, Bollywood, Mandopop, Brazilian funk, Turkish pop,
+Arabic pop, French chanson, Nigerian afropop, UK grime, drill, garage, and global hits
+from 1950s to 2025. You can identify songs even from partial, paraphrased, or translated lyrics.
 
-ANALYZE the following:
+TASK: A player submitted this lyric in a music trivia game. Assess whether it comes from a
+real song, identify it if possible, and score credibility.
+
+INPUT:
 Lyric fragment: "${lyricFragment}"
-Artist hint: "${artistHint}"
-Prompt word: "${promptWord}"
+Artist they named: "${artistHint || '(not provided)'}"
+${songHintLine}
+Prompt word for this round: "${promptWord}"
 
-Return ONLY valid JSON (no markdown, no explanation) in this exact shape:
+ARTIST FIELD RULES (critical):
+- Players often type in search-engine style: "Ariana Grande", "Bang Bang Ariana Grande",
+  or just a song title. Accept all these formats.
+- A separate song title hint may be provided if the player typed "Artist - Song" format.
+  Use it as strong additional evidence to identify the correct track.
+- For collaboration tracks (e.g. Jessie J, Ariana Grande & Nicki Minaj on "Bang Bang"),
+  accepting ANY of the featured artists is fully valid.
+- Accept common artist nicknames (Drake, Ye/Kanye, MJ, Bey, Riri, Dua, Biebs, etc.)
+- If the artist is wrong but the lyric is clearly real, STILL validate the lyric —
+  set confirmedArtist to the correct one and award appropriate confidence.
+- The LYRIC is the primary evidence; artist is a supporting hint only.
+
+LYRIC VALIDATION RULES:
+- Cross every genre and language. A Yoruba Afrobeats lyric is as valid as a Drake line.
+- Accept paraphrases / slight misquotes (people rarely remember lyrics perfectly).
+- Accept translated lyrics if the original song exists in that language.
+- Do NOT penalise for obscure or non-English songs — reward genuine knowledge.
+- wordMatch = true if the lyric contains the prompt word OR a conjugated/translated form of it.
+
+CONFIDENCE SCALE:
+90-100 → Identified exact song, lyric is accurate or very close
+70-89  → Strong match, minor wording uncertainty or artist ambiguity
+50-69  → Lyric pattern sounds real and plausible, can't pin exact song
+30-49  → Possibly real but too generic or significantly misattributed
+0-29   → Appears fabricated, nonsensical, or matches no known song
+
+Return ONLY raw JSON (no markdown fences, no extra text):
 {
-  "songTitle": "<most likely song title, or null if unidentifiable>",
-  "confirmedArtist": "<corrected/confirmed artist name, or null>",
-  "confidence": <integer 0-100>,
-  "lyricMatch": <true|false — does this lyric plausibly belong to a real song?>,
-  "wordMatch": <true|false — does the lyric contain or clearly reference the prompt word "${promptWord}"?>,
-  "reasoning": "<1-2 sentence explanation of your confidence score>",
-  "spotifyQuery": "<search string optimized for Spotify API, e.g. 'track:Halo artist:Beyonce'>"
+  "songTitle": "<exact song title or null>",
+  "confirmedArtist": "<correct artist name or null>",
+  "confidence": <0-100 integer>,
+  "lyricMatch": <true|false>,
+  "wordMatch": <true|false>,
+  "reasoning": "<1-2 sentences explaining the score — mention genre/language if relevant>"
+}`;
+
+  const result = await model.generateContent(prompt);
+  const text = result.response.text().trim();
+  const cleaned = text.replace(/^```json?\n?/m, '').replace(/\n?```$/m, '').trim();
+  return JSON.parse(cleaned);
 }
 
-SCORING GUIDE for confidence:
-- 90-100: You can identify the exact song and the lyric is accurate
-- 70-89:  You recognize the lyric but have minor uncertainty about artist/title
-- 50-69:  The lyric sounds real and plausible but you can't pin it exactly
-- 30-49:  The lyric could be real but seems generic or misattributed
-- 0-29:   The lyric doesn't match any known song or appears fabricated
+/**
+ * Get a famous well-known song example for a given word (shown as hint on round end).
+ * Excludes songs already used as answers this game.
+ */
+export async function getFamousSongHint({ word, usedSongs = [] }) {
+  const { GoogleGenerativeAI } = await import('@google/generative-ai');
+  const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
-IMPORTANT: Be generous with lesser-known songs, regional hits, and non-English songs.
-A player naming a deep cut they genuinely know deserves full credit.`;
+  const exclude = usedSongs.length > 0
+    ? `Do NOT use any of these songs (already submitted by players this round): ${usedSongs.join(', ')}.`
+    : '';
 
-  const result = await model.generateContent(systemPrompt);
+  const prompt = `Give me ONE extremely famous, universally-recognised song where the word "${word}" clearly appears in the lyrics.
+${exclude}
+Pick a massive chart hit or timeless classic that almost anyone would know.
+
+Return ONLY raw JSON (no markdown fences):
+{
+  "songTitle": "<song title>",
+  "artist": "<main artist or group>",
+  "lyricLine": "<the exact lyric line containing the word '${word}'>",
+  "joke": "<a short playful quip, max 8 words, e.g. 'Hidden in plain sight!' or 'Right under your nose the whole time!'>"
+}`;
+
+  const result = await model.generateContent(prompt);
   const text = result.response.text().trim();
-
-  // Strip markdown code fences if Gemini wraps the JSON
-  const cleaned = text.replace(/^```json?\n?/, '').replace(/\n?```$/, '');
+  const cleaned = text.replace(/^```json?\n?/m, '').replace(/\n?```$/m, '').trim();
   return JSON.parse(cleaned);
 }
