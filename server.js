@@ -89,6 +89,8 @@ app.prepare().then(async () => {
       room.isActive = true;
       room.currentLetterIndex = 0;
 
+      // Broadcast updated state so all clients leave the lobby immediately
+      io.to(roomId).emit('room-update', buildRoomState(room));
       startRound(io, room, roomId);
     });
 

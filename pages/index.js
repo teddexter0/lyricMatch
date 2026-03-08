@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
-import { signInWithGoogle, logOut, onAuth, handleAuthRedirect } from '../lib/firebase';
+import { signInWithGoogle, logOut, onAuth } from '../lib/firebase';
 
 const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
 
@@ -20,17 +20,24 @@ export default function Home() {
     return () => clearInterval(t);
   }, []);
 
-  // Firebase auth listener + handle return from Google redirect
+  // Firebase auth listener
   useEffect(() => {
-    // Process result if user just came back from Google's OAuth redirect
-    handleAuthRedirect();
     const unsub = onAuth((u) => {
       setUser(u);
-      if (u) setPlayerName(u.displayName || '');
+      if (u && !playerName) setPlayerName(u.displayName || '');
       setAuthLoading(false);
     });
     return unsub;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  function handleNameChange(e) {
+    // Strip anything that's not a letter, space, apostrophe, or hyphen
+    let val = e.target.value.replace(/[^a-zA-Z\s'\-]/g, '');
+    // Auto-capitalize first letter
+    if (val.length > 0) val = val.charAt(0).toUpperCase() + val.slice(1);
+    setPlayerName(val);
+  }
 
   function generateRoomId() {
     return Math.random().toString(36).slice(2, 8).toUpperCase();
@@ -163,14 +170,15 @@ export default function Home() {
 
             {/* Player name */}
             <label style={{ fontSize: '0.85rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.4rem' }}>
-              Your name
+              Display name{user && <span style={{ color: 'var(--accent-green)', marginLeft: '0.4rem', fontSize: '0.75rem' }}>← edit me</span>}
             </label>
             <input
               className="lyric-input"
               style={{ marginBottom: '1rem' }}
-              placeholder={user ? user.displayName : 'Enter your name...'}
+              placeholder="Enter your name..."
               value={playerName}
-              onChange={(e) => setPlayerName(e.target.value)}
+              maxLength={20}
+              onChange={handleNameChange}
               onKeyDown={(e) => e.key === 'Enter' && handleStart()}
             />
 
