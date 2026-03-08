@@ -36,7 +36,6 @@ export default function Home() {
       setAuthLoading(false);
     });
     return unsub;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function handleNameChange(e) {

@@ -433,7 +433,7 @@ export default function GameBoard({ roomId, playerName }) {
             <div className="glass-card fade-in-up" style={{ maxWidth: 340, width: '100%', padding: '2rem', textAlign: 'center' }}>
               <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>🚪</div>
               <h2 style={{ fontWeight: 800, fontSize: '1.2rem', marginBottom: '0.5rem' }}>Leave the room?</h2>
-              <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', marginBottom: '1.5rem' }}>You'll go back to the home screen.</p>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', marginBottom: '1.5rem' }}>You&apos;ll go back to the home screen.</p>
               <div style={{ display: 'flex', gap: '0.75rem' }}>
                 <button className="btn-secondary" style={{ flex: 1 }} onClick={() => setShowLeaveConfirm(false)}>Stay</button>
                 <button onClick={leaveRoom} style={{ flex: 1, background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.4)', borderRadius: 10, padding: '0.6rem', color: '#f87171', fontWeight: 700, fontSize: '0.9rem', cursor: 'pointer' }}>Leave</button>
@@ -640,7 +640,7 @@ export default function GameBoard({ roomId, playerName }) {
                       It was right there! 👀
                     </p>
                     <p style={{ fontSize: '0.85rem', fontStyle: 'italic', color: 'var(--text-muted)', marginBottom: '0.4rem' }}>
-                      "{songHint.lyricLine}"
+                      &quot;{songHint.lyricLine}&quot;
                     </p>
                     <p style={{ fontSize: '0.9rem', fontWeight: 700 }}>
                       🎵 {songHint.songTitle} — {songHint.artist}
