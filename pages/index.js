@@ -114,14 +114,14 @@ export default function Home() {
 
           <p style={{ color: 'var(--text-muted)', fontSize: '1.1rem', maxWidth: 520, margin: '0 auto 2.5rem' }}>
             Each round shows a letter + a music word. Type a real lyric containing
-            it, name the artist — Gemini scores your credibility. Spotify plays the song.
+            it, name the artist — Gemini scores your credibility and links you to the song.
           </p>
 
           {/* Feature chips */}
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem', justifyContent: 'center', marginBottom: '3rem' }}>
             {[
               { icon: '🤖', label: 'Gemini AI verification' },
-              { icon: '🎵', label: 'Spotify playback' },
+              { icon: '🔗', label: 'Song search links' },
               { icon: '⚡', label: 'Real-time multiplayer' },
               { icon: '🏆', label: 'Global leaderboard' },
             ].map(({ icon, label }) => (
@@ -223,9 +223,9 @@ export default function Home() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             {[
               { num: '01', title: 'A letter + word appears', desc: 'Each round the game shows a letter (A→Z) and a random music word starting with it.' },
-              { num: '02', title: 'Type a real lyric', desc: 'Type any lyric line from a song you know — like you\'re searching Spotify.' },
+              { num: '02', title: 'Type a real lyric', desc: 'Type any lyric line from a song you know — artist name optional but boosts your score.' },
               { num: '03', title: 'Name the artist', desc: 'Tell us who sang it. Gemini AI cross-checks your lyric + artist combo.' },
-              { num: '04', title: 'Score by confidence', desc: 'Get up to 100% credibility score. Rarer letters = more points. Spotify plays the song!' },
+              { num: '04', title: 'Score by confidence', desc: 'Get up to 100% credibility score. Rarer letters = more points. Find the song on Spotify, YouTube or Apple Music!' },
             ].map(({ num, title, desc }) => (
               <div key={num} className="glass-card" style={{ padding: '1.2rem 1.5rem', display: 'flex', gap: '1rem', alignItems: 'flex-start' }}>
                 <span style={{ fontSize: '0.7rem', fontWeight: 800, color: 'var(--accent-green)', opacity: 0.7, paddingTop: 2, flexShrink: 0 }}>{num}</span>
@@ -241,7 +241,7 @@ export default function Home() {
         {/* ── Footer ── */}
         <footer style={{ textAlign: 'center', padding: '2rem 0', borderTop: '1px solid var(--border-subtle)' }}>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
-            lyricMatch · Powered by Gemini AI + Spotify · Not affiliated with any music label
+            lyricMatch · Powered by Gemini AI · Not affiliated with any music label
           </p>
         </footer>
       </div>
