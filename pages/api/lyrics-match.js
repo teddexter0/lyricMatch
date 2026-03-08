@@ -3,6 +3,7 @@
  * Body: { lyricFragment, artistHint, promptWord, letter }
  *
  * Calls Gemini to analyze the lyric and returns a credibility report.
+ * Handles "Artist - Song Title" format in artistHint automatically.
  * No Spotify API — free search links replace it (zero rate limits).
  */
 
@@ -13,6 +14,23 @@ const LETTER_SCORES = {
   L: 1, M: 3, N: 1, O: 1, P: 3, Q: 10, R: 1, S: 1, T: 1, U: 1, V: 4,
   W: 4, X: 8, Y: 4, Z: 10,
 };
+
+/**
+ * Parse "Ariana Grande - Bang Bang" or "Bang Bang - Ariana Grande" into
+ * separate artist and song title hints so Gemini can use both.
+ */
+function parseArtistHint(raw) {
+  if (!raw || !raw.trim()) return { artist: '', songTitleHint: '' };
+  // Split on dash, em-dash, or en-dash surrounded by optional spaces
+  const parts = raw.split(/\s*[-–—]\s*/);
+  if (parts.length >= 2) {
+    return {
+      artist: parts[0].trim(),
+      songTitleHint: parts.slice(1).join(' ').trim(),
+    };
+  }
+  return { artist: raw.trim(), songTitleHint: '' };
+}
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -26,7 +44,13 @@ export default async function handler(req, res) {
   }
 
   try {
-    const analysis = await analyzeLyric({ lyricFragment, artistHint: artistHint || '', promptWord });
+    const { artist, songTitleHint } = parseArtistHint(artistHint);
+    const analysis = await analyzeLyric({
+      lyricFragment,
+      artistHint: artist,
+      songTitleHint,
+      promptWord,
+    });
 
     const letterScore = LETTER_SCORES[letter.toUpperCase()] || 1;
     const wordBonus = analysis.wordMatch ? 1.5 : 1;

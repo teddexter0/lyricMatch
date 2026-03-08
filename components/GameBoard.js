@@ -6,6 +6,51 @@ import { onAuth, submitGameScore } from '../lib/firebase';
 const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
 const ROUND_TIME = 60;
 
+// ── Toast system ────────────────────────────────────────────────────────────
+function useToasts() {
+  const [toasts, setToasts] = useState([]);
+  function addToast(msg, type = 'info') {
+    const id = Date.now() + Math.random();
+    setToasts((prev) => [...prev, { id, msg, type }]);
+    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 3500);
+  }
+  return { toasts, addToast };
+}
+
+function ToastStack({ toasts }) {
+  if (!toasts.length) return null;
+  return (
+    <div style={{
+      position: 'fixed', bottom: '1.5rem', left: '50%', transform: 'translateX(-50%)',
+      display: 'flex', flexDirection: 'column', gap: '0.5rem',
+      alignItems: 'center', zIndex: 200, pointerEvents: 'none',
+    }}>
+      {toasts.map((t) => (
+        <div key={t.id} style={{
+          background: t.type === 'leave' ? 'rgba(239,68,68,0.15)' : 'rgba(29,185,84,0.13)',
+          border: `1px solid ${t.type === 'leave' ? 'rgba(239,68,68,0.35)' : 'rgba(29,185,84,0.3)'}`,
+          color: '#fff',
+          borderRadius: 999,
+          padding: '0.5rem 1.25rem',
+          fontSize: '0.85rem',
+          fontWeight: 600,
+          backdropFilter: 'blur(8px)',
+          animation: 'slideUpFade 0.3s ease',
+          whiteSpace: 'nowrap',
+        }}>
+          {t.msg}
+        </div>
+      ))}
+      <style>{`
+        @keyframes slideUpFade {
+          from { opacity: 0; transform: translateY(10px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+      `}</style>
+    </div>
+  );
+}
+
 function ConfidenceMeter({ value }) {
   const pct = Math.max(0, Math.min(100, value));
   const cls = pct >= 70 ? 'confidence-high' : pct >= 40 ? 'confidence-mid' : 'confidence-low';
@@ -57,7 +102,7 @@ function SearchLinks({ links }) {
   );
 }
 
-function PlayerCard({ name, score, isYou, submission, currentLetter }) {
+function PlayerCard({ name, score, isYou, submission }) {
   const hasResult = submission?.result;
   const confidence = hasResult ? submission.result.confidence : null;
   const pending = submission?.pending;
@@ -141,6 +186,20 @@ export default function GameBoard({ roomId, playerName }) {
   const [roundResults, setRoundResults] = useState(null);
   const [showRoundResult, setShowRoundResult] = useState(false);
   const [myLastResult, setMyLastResult] = useState(null);
+  const [roundTimedOut, setRoundTimedOut] = useState(false);
+  const [songHint, setSongHint] = useState(null);
+  const [hintLoading, setHintLoading] = useState(false);
+
+  // Pause state
+  const [isPaused, setIsPaused] = useState(false);
+  const [pauseRequestedBy, setPauseRequestedBy] = useState(null);
+  const [pauseVotes, setPauseVotes] = useState({ votes: 0, needed: 0 });
+
+  // Toast notifications
+  const { toasts, addToast } = useToasts();
+
+  // Leave-room confirmation dialog
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
 
   // Auth
   useEffect(() => {
@@ -162,6 +221,7 @@ export default function GameBoard({ roomId, playerName }) {
       setCurrentWord(state.currentWord || '');
       setTimer(state.timer ?? ROUND_TIME);
       setGameStarted(state.gameStarted);
+      setIsPaused(state.isPaused || false);
     });
 
     socket.on('new-round', ({ letter, word, letterIndex, timer: t }) => {
@@ -176,6 +236,10 @@ export default function GameBoard({ roomId, playerName }) {
       setSubmissions({});
       setShowRoundResult(false);
       setMyLastResult(null);
+      setRoundTimedOut(false);
+      setSongHint(null);
+      setIsPaused(false);
+      setPauseRequestedBy(null);
     });
 
     socket.on('timer-update', ({ timer: t }) => setTimer(t));
@@ -192,18 +256,36 @@ export default function GameBoard({ roomId, playerName }) {
       }
     });
 
-    socket.on('round-complete', ({ submissions: subs, scores: sc }) => {
+    socket.on('round-complete', async ({ submissions: subs, scores: sc, timedOut, promptWord, usedSongs }) => {
       setSubmissions(subs);
       setScores(sc);
       setShowRoundResult(true);
       setRoundResults(subs);
+      setRoundTimedOut(!!timedOut);
+
+      // Fetch a famous song hint (shown as playful reveal when timed out)
+      if (timedOut && promptWord) {
+        setHintLoading(true);
+        try {
+          const resp = await fetch('/api/song-hint', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ word: promptWord, usedSongs: usedSongs || [] }),
+          });
+          const hint = await resp.json();
+          setSongHint(hint.songTitle ? hint : null);
+        } catch {
+          setSongHint(null);
+        } finally {
+          setHintLoading(false);
+        }
+      }
     });
 
     socket.on('game-complete', ({ winner: w, scores: sc }) => {
       setScores(sc);
       setWinner(w);
       setGameOver(true);
-      // Save score to Firebase
       if (user) {
         const myScore = sc[playerName] || 0;
         submitGameScore(user.uid, myScore).catch(console.error);
@@ -231,8 +313,32 @@ export default function GameBoard({ roomId, playerName }) {
       }
     });
 
+    socket.on('game-paused', ({ pausedBy }) => {
+      setIsPaused(true);
+      setPauseRequestedBy(null);
+    });
+
+    socket.on('game-resumed', () => {
+      setIsPaused(false);
+      setPauseRequestedBy(null);
+    });
+
+    socket.on('pause-requested', ({ by, votes, needed }) => {
+      setPauseRequestedBy(by);
+      setPauseVotes({ votes, needed });
+    });
+
     socket.on('player-left', ({ playerName: pn }) => {
       setPlayers((prev) => prev.filter((p) => p !== pn));
+      if (pn !== playerName) {
+        addToast(`🚪 ${pn} left the room`, 'leave');
+      }
+    });
+
+    socket.on('player-joined', ({ playerName: pn }) => {
+      if (pn !== playerName) {
+        addToast(`👋 ${pn} joined the room`);
+      }
     });
 
     return () => socket.disconnect();
@@ -249,20 +355,45 @@ export default function GameBoard({ roomId, playerName }) {
     socketRef.current?.emit('submit-lyric', { roomId, playerName, lyric: lyric.trim(), artist: artist.trim() });
   }
 
+  function requestPause() {
+    socketRef.current?.emit('request-pause', { roomId });
+  }
+
+  function resumeGame() {
+    socketRef.current?.emit('resume-game', { roomId });
+  }
+
+  function agreeToResume() {
+    setPauseRequestedBy(null);
+    socketRef.current?.emit('request-pause', { roomId }); // cast vote
+  }
+
+  function leaveRoom() {
+    socketRef.current?.emit('leave-room', { roomId, playerName });
+    socketRef.current?.disconnect();
+    router.push('/');
+  }
+
   const currentLetter = ALPHABET[currentLetterIndex];
   const timerPct = (timer / ROUND_TIME) * 100;
   const timerColor = timer > 20 ? '#1db954' : timer > 10 ? '#f59e0b' : '#ef4444';
 
-  // ── Game over screen ────────────────────────────────────────────────────────
+  // ── Game over screen ─────────────────────────────────────────────────────────
   if (gameOver) {
     const sorted = Object.entries(scores).sort(([, a], [, b]) => b - a);
+    const iWon = winner === playerName;
     return (
       <div style={{ minHeight: '100vh', background: 'var(--bg-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem' }}>
         <div className="glass-card fade-in-up" style={{ maxWidth: 500, width: '100%', padding: '2.5rem', textAlign: 'center' }}>
-          <div style={{ fontSize: '3rem', marginBottom: '0.5rem' }}>🏆</div>
+          <div style={{ fontSize: '3rem', marginBottom: '0.5rem' }}>{iWon ? '🏆' : '🎵'}</div>
           <h1 style={{ fontWeight: 900, fontSize: '2rem', marginBottom: '0.25rem' }}>
-            {winner === playerName ? 'You won!' : `${winner} wins!`}
+            {iWon ? 'You won!' : `${winner} wins!`}
           </h1>
+          {!iWon && (
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '0.5rem', fontStyle: 'italic' }}>
+              The answers were there all along — the songs never lie 🎶
+            </p>
+          )}
           <p style={{ color: 'var(--text-muted)', marginBottom: '2rem' }}>Final scores</p>
 
           <div style={{ marginBottom: '2rem' }}>
@@ -280,7 +411,7 @@ export default function GameBoard({ roomId, playerName }) {
           </div>
 
           <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center' }}>
-            <button className="btn-primary" onClick={() => { window.location.href = `/game/${roomId}?name=${playerName}`; }}>
+            <button className="btn-primary" onClick={() => { window.location.href = `/game/${roomId}?name=${encodeURIComponent(playerName)}`; }}>
               Play again
             </button>
             <button className="btn-secondary" onClick={() => router.push('/')}>
@@ -292,10 +423,24 @@ export default function GameBoard({ roomId, playerName }) {
     );
   }
 
-  // ── Lobby ────────────────────────────────────────────────────────────────────
+  // ── Lobby ─────────────────────────────────────────────────────────────────────
   if (!gameStarted) {
     return (
       <div style={{ minHeight: '100vh', background: 'var(--bg-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem' }}>
+        <ToastStack toasts={toasts} />
+        {showLeaveConfirm && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 150, backdropFilter: 'blur(4px)', padding: '1.5rem' }}>
+            <div className="glass-card fade-in-up" style={{ maxWidth: 340, width: '100%', padding: '2rem', textAlign: 'center' }}>
+              <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>🚪</div>
+              <h2 style={{ fontWeight: 800, fontSize: '1.2rem', marginBottom: '0.5rem' }}>Leave the room?</h2>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', marginBottom: '1.5rem' }}>You'll go back to the home screen.</p>
+              <div style={{ display: 'flex', gap: '0.75rem' }}>
+                <button className="btn-secondary" style={{ flex: 1 }} onClick={() => setShowLeaveConfirm(false)}>Stay</button>
+                <button onClick={leaveRoom} style={{ flex: 1, background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.4)', borderRadius: 10, padding: '0.6rem', color: '#f87171', fontWeight: 700, fontSize: '0.9rem', cursor: 'pointer' }}>Leave</button>
+              </div>
+            </div>
+          </div>
+        )}
         <div className="glass-card fade-in-up" style={{ maxWidth: 480, width: '100%', padding: '2.5rem', textAlign: 'center' }}>
           <div className="waveform" style={{ justifyContent: 'center', marginBottom: '1rem' }}>
             <span /><span /><span /><span /><span />
@@ -326,9 +471,17 @@ export default function GameBoard({ roomId, playerName }) {
             </div>
           </div>
 
-          <button className="btn-primary" style={{ width: '100%' }} onClick={startGame}>
-            Start game →
-          </button>
+          <div style={{ display: 'flex', gap: '0.75rem' }}>
+            <button className="btn-primary" style={{ flex: 1 }} onClick={startGame}>
+              Start game →
+            </button>
+            <button
+              onClick={() => setShowLeaveConfirm(true)}
+              style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 10, padding: '0.6rem 1rem', color: '#f87171', fontWeight: 700, fontSize: '0.85rem', cursor: 'pointer' }}
+            >
+              🚪 Leave
+            </button>
+          </div>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.78rem', marginTop: '0.75rem' }}>
             Game starts for everyone when you click start
           </p>
@@ -337,9 +490,178 @@ export default function GameBoard({ roomId, playerName }) {
     );
   }
 
-  // ── Main game ────────────────────────────────────────────────────────────────
+  // ── Main game ─────────────────────────────────────────────────────────────────
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--bg-primary)', padding: '1.5rem' }}>
+    <div style={{ minHeight: '100vh', background: 'var(--bg-primary)', padding: '1.5rem', position: 'relative' }}>
+
+      {/* ── Toast notifications ── */}
+      <ToastStack toasts={toasts} />
+
+      {/* ── Leave-room confirmation dialog ── */}
+      {showLeaveConfirm && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 150, backdropFilter: 'blur(4px)', padding: '1.5rem',
+        }}>
+          <div className="glass-card fade-in-up" style={{ maxWidth: 340, width: '100%', padding: '2rem', textAlign: 'center' }}>
+            <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>🚪</div>
+            <h2 style={{ fontWeight: 800, fontSize: '1.2rem', marginBottom: '0.5rem' }}>Leave the room?</h2>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', marginBottom: '1.5rem' }}>
+              {gameStarted && !gameOver
+                ? "You'll forfeit your current game score and your spot in the room."
+                : "You'll go back to the home screen."}
+            </p>
+            <div style={{ display: 'flex', gap: '0.75rem' }}>
+              <button
+                className="btn-secondary"
+                style={{ flex: 1 }}
+                onClick={() => setShowLeaveConfirm(false)}
+              >
+                Stay
+              </button>
+              <button
+                onClick={leaveRoom}
+                style={{
+                  flex: 1, background: 'rgba(239,68,68,0.15)',
+                  border: '1px solid rgba(239,68,68,0.4)',
+                  borderRadius: 10, padding: '0.6rem',
+                  color: '#f87171', fontWeight: 700, fontSize: '0.9rem', cursor: 'pointer',
+                }}
+              >
+                Leave
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Pause overlay ── */}
+      {isPaused && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 100, backdropFilter: 'blur(6px)',
+        }}>
+          <div className="glass-card fade-in-up" style={{ padding: '2.5rem', textAlign: 'center', maxWidth: 360, width: '100%' }}>
+            <div style={{ fontSize: '2.5rem', marginBottom: '0.75rem' }}>⏸</div>
+            <h2 style={{ fontWeight: 800, fontSize: '1.4rem', marginBottom: '0.5rem' }}>Game Paused</h2>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '1.5rem' }}>
+              Timer is frozen. All players can see this.
+            </p>
+            <button className="btn-primary" style={{ width: '100%' }} onClick={resumeGame}>
+              ▶ Resume
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Pause request banner (from another player) ── */}
+      {pauseRequestedBy && !isPaused && (
+        <div style={{
+          position: 'fixed', top: '1rem', left: '50%', transform: 'translateX(-50%)',
+          background: 'rgba(245,158,11,0.15)', border: '1px solid rgba(245,158,11,0.4)',
+          borderRadius: 12, padding: '0.75rem 1.5rem', zIndex: 90,
+          display: 'flex', alignItems: 'center', gap: '1rem',
+        }}>
+          <span style={{ fontSize: '0.9rem' }}>
+            <strong>{pauseRequestedBy}</strong> wants to pause ({pauseVotes.votes}/{pauseVotes.needed})
+          </span>
+          <button
+            onClick={agreeToResume}
+            style={{
+              background: '#f59e0b', color: '#000', border: 'none',
+              borderRadius: 8, padding: '0.35rem 0.9rem',
+              fontSize: '0.82rem', fontWeight: 700, cursor: 'pointer',
+            }}
+          >
+            Agree
+          </button>
+          <button
+            onClick={() => setPauseRequestedBy(null)}
+            style={{
+              background: 'transparent', color: 'var(--text-muted)', border: 'none',
+              fontSize: '0.8rem', cursor: 'pointer',
+            }}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {/* ── Round-complete overlay ── */}
+      {showRoundResult && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 80, backdropFilter: 'blur(4px)', padding: '1.5rem',
+        }}>
+          <div className="glass-card fade-in-up" style={{ maxWidth: 500, width: '100%', padding: '2rem' }}>
+            <h2 style={{ fontWeight: 800, fontSize: '1.3rem', marginBottom: '1rem', textAlign: 'center' }}>
+              Round complete!
+            </h2>
+
+            {/* Show each player's result */}
+            {roundResults && Object.entries(roundResults).map(([name, sub]) => (
+              <div key={name} style={{ marginBottom: '0.75rem', padding: '0.75rem', background: 'rgba(255,255,255,0.04)', borderRadius: 8 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.3rem' }}>
+                  <span style={{ fontWeight: 700, fontSize: '0.9rem' }}>{name}</span>
+                  {sub.result && (
+                    <span className="score-badge">+{sub.result.gameScore || 0} pts</span>
+                  )}
+                </div>
+                {sub.result?.songTitle && (
+                  <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                    🎵 {sub.result.songTitle} — {sub.result.confirmedArtist}
+                  </p>
+                )}
+                {sub.result && <ConfidenceMeter value={sub.result.confidence || 0} />}
+                {!sub.result && (
+                  <p style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.3)' }}>No submission</p>
+                )}
+              </div>
+            ))}
+
+            {/* Timed-out hint reveal */}
+            {roundTimedOut && (
+              <div style={{
+                marginTop: '1rem', padding: '1rem',
+                background: 'rgba(196,181,253,0.08)',
+                border: '1px solid rgba(196,181,253,0.25)',
+                borderRadius: 10,
+              }}>
+                {hintLoading ? (
+                  <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', textAlign: 'center' }}>
+                    Finding a hint…
+                  </p>
+                ) : songHint ? (
+                  <>
+                    <p style={{ fontSize: '0.78rem', color: '#c4b5fd', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.4rem' }}>
+                      It was right there! 👀
+                    </p>
+                    <p style={{ fontSize: '0.85rem', fontStyle: 'italic', color: 'var(--text-muted)', marginBottom: '0.4rem' }}>
+                      "{songHint.lyricLine}"
+                    </p>
+                    <p style={{ fontSize: '0.9rem', fontWeight: 700 }}>
+                      🎵 {songHint.songTitle} — {songHint.artist}
+                    </p>
+                    {songHint.joke && (
+                      <p style={{ fontSize: '0.78rem', color: '#c4b5fd', marginTop: '0.4rem', fontStyle: 'italic' }}>
+                        {songHint.joke}
+                      </p>
+                    )}
+                  </>
+                ) : null}
+              </div>
+            )}
+
+            <p style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.78rem', marginTop: '1rem' }}>
+              Next round starting soon…
+            </p>
+          </div>
+        </div>
+      )}
+
       <div style={{ maxWidth: 900, margin: '0 auto' }}>
 
         {/* Header */}
@@ -352,9 +674,37 @@ export default function GameBoard({ roomId, playerName }) {
               lyric<span style={{ color: 'var(--accent-green)' }}>Match</span>
             </span>
           </div>
-          <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontFamily: 'monospace' }}>
-            Room: {roomId}
-          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontFamily: 'monospace' }}>
+              Room: {roomId}
+            </span>
+            {!submitted && !showRoundResult && (
+              <button
+                onClick={requestPause}
+                style={{
+                  background: 'rgba(255,255,255,0.06)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: 8, padding: '0.35rem 0.8rem',
+                  fontSize: '0.8rem', color: 'var(--text-muted)',
+                  cursor: 'pointer',
+                }}
+              >
+                ⏸ Pause
+              </button>
+            )}
+            <button
+              onClick={() => setShowLeaveConfirm(true)}
+              style={{
+                background: 'rgba(239,68,68,0.08)',
+                border: '1px solid rgba(239,68,68,0.25)',
+                borderRadius: 8, padding: '0.35rem 0.8rem',
+                fontSize: '0.8rem', color: '#f87171',
+                cursor: 'pointer',
+              }}
+            >
+              🚪 Leave
+            </button>
+          </div>
         </div>
 
         {/* A-Z Progress */}
@@ -407,7 +757,7 @@ export default function GameBoard({ roomId, playerName }) {
               <div>
                 <p style={{ fontWeight: 700, fontSize: '0.9rem' }}>Time left</p>
                 <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
-                  {submitted ? 'Submitted! Waiting…' : 'Type fast!'}
+                  {submitted ? 'Submitted! Waiting…' : isPaused ? 'Paused' : 'Type fast!'}
                 </p>
               </div>
             </div>
@@ -416,23 +766,23 @@ export default function GameBoard({ roomId, playerName }) {
             {!submitted ? (
               <div className="glass-card" style={{ padding: '1.5rem' }}>
                 <label style={{ fontSize: '0.82rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.4rem' }}>
-                  Type a lyric you know
+                  Type a lyric containing &ldquo;<span style={{ color: '#c4b5fd' }}>{currentWord}</span>&rdquo;
                 </label>
                 <textarea
                   className="lyric-input"
                   rows={3}
-                  placeholder={`e.g. "Is this the real life, is this just fantasy…"`}
+                  placeholder={`e.g. a line from any song that has "${currentWord}" in it…`}
                   value={lyric}
                   onChange={(e) => setLyric(e.target.value)}
                   style={{ marginBottom: '0.75rem' }}
                 />
 
                 <label style={{ fontSize: '0.82rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.4rem' }}>
-                  Artist / band name
+                  Artist · band · or &ldquo;Song Title — Artist&rdquo;
                 </label>
                 <input
                   className="lyric-input"
-                  placeholder="e.g. Queen"
+                  placeholder={`e.g. Ariana Grande  or  "Bang Bang — Ariana Grande"`}
                   value={artist}
                   onChange={(e) => setArtist(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && submitLyric()}
@@ -442,7 +792,7 @@ export default function GameBoard({ roomId, playerName }) {
                 <button
                   className="btn-primary"
                   style={{ width: '100%' }}
-                  disabled={!lyric.trim() || timer === 0}
+                  disabled={!lyric.trim() || timer === 0 || isPaused}
                   onClick={submitLyric}
                 >
                   Submit →
@@ -498,7 +848,6 @@ export default function GameBoard({ roomId, playerName }) {
                 score={scores[p] || 0}
                 isYou={p === playerName}
                 submission={submissions[p]}
-                currentLetter={currentLetter}
               />
             ))}
 
