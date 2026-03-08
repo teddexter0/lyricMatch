@@ -20,11 +20,19 @@ export default function Home() {
     return () => clearInterval(t);
   }, []);
 
+  // Restore saved name from localStorage on mount
+  useEffect(() => {
+    const saved = typeof window !== 'undefined' && localStorage.getItem('lyricmatch_name');
+    if (saved) setPlayerName(saved);
+  }, []);
+
   // Firebase auth listener
   useEffect(() => {
     const unsub = onAuth((u) => {
       setUser(u);
-      if (u && !playerName) setPlayerName(u.displayName || '');
+      // Only pre-fill from Google if the user hasn't manually set a name
+      const saved = typeof window !== 'undefined' && localStorage.getItem('lyricmatch_name');
+      if (u && !saved) setPlayerName(u.displayName || '');
       setAuthLoading(false);
     });
     return unsub;
@@ -37,6 +45,7 @@ export default function Home() {
     // Auto-capitalize first letter
     if (val.length > 0) val = val.charAt(0).toUpperCase() + val.slice(1);
     setPlayerName(val);
+    if (typeof window !== 'undefined') localStorage.setItem('lyricmatch_name', val);
   }
 
   function generateRoomId() {
