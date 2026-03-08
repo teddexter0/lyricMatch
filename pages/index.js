@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
-import { signInWithGoogle, logOut, onAuth } from '../lib/firebase';
+import { signInWithGoogle, logOut, onAuth, handleAuthRedirect } from '../lib/firebase';
 
 const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
 
@@ -20,8 +20,10 @@ export default function Home() {
     return () => clearInterval(t);
   }, []);
 
-  // Firebase auth listener
+  // Firebase auth listener + handle return from Google redirect
   useEffect(() => {
+    // Process result if user just came back from Google's OAuth redirect
+    handleAuthRedirect();
     const unsub = onAuth((u) => {
       setUser(u);
       if (u) setPlayerName(u.displayName || '');
@@ -71,6 +73,7 @@ export default function Home() {
               user ? (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                   {user.photoURL && (
+                    // eslint-disable-next-line @next/next/no-img-element
                     <img src={user.photoURL} alt="" style={{ width: 32, height: 32, borderRadius: '50%', border: '2px solid var(--accent-green)' }} />
                   )}
                   <span style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>{user.displayName}</span>
@@ -130,7 +133,7 @@ export default function Home() {
         </section>
 
         {/* ── Play card ── */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem', alignItems: 'start', maxWidth: 800, margin: '0 auto 4rem' }}>
+        <div className="play-grid">
 
           {/* Create / Join form */}
           <div className="glass-card" style={{ padding: '2rem' }}>

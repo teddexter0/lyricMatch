@@ -2,12 +2,11 @@
  * POST /api/lyrics-match
  * Body: { lyricFragment, artistHint, promptWord, letter }
  *
- * Calls Gemini to analyze the lyric, then Spotify to find the track.
- * Returns a full credibility report used by the game to score the submission.
+ * Calls Gemini to analyze the lyric and returns a credibility report.
+ * No Spotify API — free search links replace it (zero rate limits).
  */
 
 import { analyzeLyric } from '../../lib/gemini';
-import { searchTrack } from '../../lib/spotify';
 
 const LETTER_SCORES = {
   A: 1, B: 3, C: 3, D: 2, E: 1, F: 4, G: 2, H: 4, I: 1, J: 8, K: 5,
@@ -27,35 +26,26 @@ export default async function handler(req, res) {
   }
 
   try {
-    // 1. Gemini analysis
     const analysis = await analyzeLyric({ lyricFragment, artistHint: artistHint || '', promptWord });
 
-    // 2. Spotify track lookup (only if Gemini is confident enough)
-    let spotifyTrack = null;
-    if (analysis.confidence >= 40 && analysis.spotifyQuery) {
-      spotifyTrack = await searchTrack(analysis.spotifyQuery);
-    }
-
-    // 3. Calculate final game score
     const letterScore = LETTER_SCORES[letter.toUpperCase()] || 1;
-    const wordBonus = analysis.wordMatch ? 1.5 : 1;       // 50% bonus for using the prompt word
-    const artistBonus = analysis.confirmedArtist ? 1.2 : 1; // 20% bonus for correct artist
-    const rawScore = (analysis.confidence / 100) * letterScore * wordBonus * artistBonus;
-    const gameScore = Math.round(rawScore * 10); // Scale to game points
+    const wordBonus = analysis.wordMatch ? 1.5 : 1;
+    const artistBonus = analysis.confirmedArtist ? 1.2 : 1;
+    const gameScore = Math.round((analysis.confidence / 100) * letterScore * wordBonus * artistBonus * 10);
 
-    return res.status(200).json({
-      ...analysis,
-      spotifyTrack,
-      gameScore,
-      letterScore,
-      breakdown: {
-        baseScore: letterScore,
-        confidenceMultiplier: `${analysis.confidence}%`,
-        wordBonus: analysis.wordMatch ? '+50%' : 'none',
-        artistBonus: analysis.confirmedArtist ? '+20%' : 'none',
-        total: gameScore,
-      },
-    });
+    // Free search links — no API key, no rate limits
+    const songQuery = [analysis.songTitle, analysis.confirmedArtist].filter(Boolean).join(' ')
+      || lyricFragment.slice(0, 50);
+    const q = encodeURIComponent(songQuery);
+    const searchLinks = analysis.confidence >= 30
+      ? {
+          spotify: `https://open.spotify.com/search/${q}`,
+          youtube: `https://music.youtube.com/search?q=${q}`,
+          apple: `https://music.apple.com/search?term=${q}`,
+        }
+      : null;
+
+    return res.status(200).json({ ...analysis, searchLinks, gameScore, letterScore });
   } catch (err) {
     console.error('[lyrics-match]', err);
     return res.status(500).json({ error: 'Analysis failed. Please try again.' });

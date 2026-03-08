@@ -1,0 +1,26 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Users ────────────────────────────────────────────────────────────────
+    // Anyone can read profiles (for leaderboard display).
+    // Only the authenticated user can write their own profile.
+    match /users/{userId} {
+      allow read: if true;
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // ── Leaderboard entries ───────────────────────────────────────────────────
+    // Anyone can read. Only authenticated users can create new entries.
+    // No updates or deletes — history is immutable.
+    match /leaderboard/{entryId} {
+      allow read: if true;
+      allow create: if request.auth != null
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.score is int
+        && request.resource.data.score >= 0;
+      allow update, delete: if false;
+    }
+  }
+}

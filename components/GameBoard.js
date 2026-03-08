@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/router';
 import { io } from 'socket.io-client';
 import { onAuth, submitGameScore } from '../lib/firebase';
@@ -23,50 +23,36 @@ function ConfidenceMeter({ value }) {
   );
 }
 
-function SpotifyPlayer({ track, autoConsent }) {
-  const [consented, setConsented] = useState(autoConsent);
-  if (!track) return null;
+function SearchLinks({ links }) {
+  if (!links) return null;
+  const services = [
+    { key: 'spotify', label: 'Spotify', color: '#1db954' },
+    { key: 'youtube', label: 'YT Music', color: '#ff0000' },
+    { key: 'apple', label: 'Apple', color: '#fc3c44' },
+  ];
   return (
-    <div style={{ marginTop: '1rem' }}>
-      {!consented ? (
-        <div style={{
-          background: 'rgba(29, 185, 84, 0.08)',
-          border: '1px solid rgba(29, 185, 84, 0.3)',
-          borderRadius: 12,
-          padding: '1rem',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: '1rem',
-          flexWrap: 'wrap',
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            {track.albumArt && <img src={track.albumArt} alt="" style={{ width: 48, height: 48, borderRadius: 6 }} />}
-            <div>
-              <p style={{ fontWeight: 700, fontSize: '0.9rem' }}>{track.title}</p>
-              <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>{track.artist}</p>
-            </div>
-          </div>
-          <button
-            className="btn-primary"
-            style={{ padding: '0.5rem 1.2rem', fontSize: '0.85rem' }}
-            onClick={() => setConsented(true)}
-          >
-            ▶ Play on Spotify
-          </button>
-        </div>
-      ) : (
-        <div className="spotify-embed-wrapper">
-          <iframe
-            src={track.embedUrl}
-            width="100%"
-            height="80"
-            frameBorder="0"
-            allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-            loading="lazy"
-          />
-        </div>
-      )}
+    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.75rem' }}>
+      {services.map(({ key, label, color }) => links[key] && (
+        <a
+          key={key}
+          href={links[key]}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{
+            background: `${color}18`,
+            border: `1px solid ${color}55`,
+            borderRadius: 999,
+            padding: '0.3rem 0.8rem',
+            fontSize: '0.78rem',
+            fontWeight: 600,
+            color,
+            textDecoration: 'none',
+            transition: 'background 0.15s',
+          }}
+        >
+          ▶ {label}
+        </a>
+      ))}
     </div>
   );
 }
@@ -156,9 +142,6 @@ export default function GameBoard({ roomId, playerName }) {
   const [showRoundResult, setShowRoundResult] = useState(false);
   const [myLastResult, setMyLastResult] = useState(null);
 
-  // Spotify
-  const [spotifyTrack, setSpotifyTrack] = useState(null);
-
   // Auth
   useEffect(() => {
     const unsub = onAuth(setUser);
@@ -192,7 +175,6 @@ export default function GameBoard({ roomId, playerName }) {
       setSubmissions({});
       setShowRoundResult(false);
       setMyLastResult(null);
-      setSpotifyTrack(null);
     });
 
     socket.on('timer-update', ({ timer: t }) => setTimer(t));
@@ -206,7 +188,6 @@ export default function GameBoard({ roomId, playerName }) {
       setSubmissions((prev) => ({ ...prev, [pn]: { ...prev[pn], result, pending: false } }));
       if (pn === playerName) {
         setMyLastResult(result);
-        if (result.spotifyTrack) setSpotifyTrack(result.spotifyTrack);
       }
     });
 
@@ -240,7 +221,6 @@ export default function GameBoard({ roomId, playerName }) {
         });
         const result = await res.json();
         socket.emit('lyric-result', { roomId: rid, playerName: pn, result });
-        if (result.spotifyTrack) setSpotifyTrack(result.spotifyTrack);
         setMyLastResult(result);
       } catch (e) {
         console.error(e);
@@ -255,6 +235,7 @@ export default function GameBoard({ roomId, playerName }) {
     });
 
     return () => socket.disconnect();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId, playerName]);
 
   function startGame() {
@@ -385,7 +366,7 @@ export default function GameBoard({ roomId, playerName }) {
         </div>
 
         {/* Main grid */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', alignItems: 'start' }}>
+        <div className="game-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', alignItems: 'start' }}>
 
           {/* ── Left: Letter + Prompt + Input ── */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -400,7 +381,7 @@ export default function GameBoard({ roomId, playerName }) {
                 <span className="prompt-word">{currentWord}</span>
               </div>
               <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.75rem' }}>
-                Type a lyric containing <strong style={{ color: '#c4b5fd' }}>"{currentWord}"</strong> for +50% bonus
+                Type a lyric containing <strong style={{ color: '#c4b5fd' }}>&ldquo;{currentWord}&rdquo;</strong> for +50% bonus
               </p>
             </div>
 
@@ -493,7 +474,7 @@ export default function GameBoard({ roomId, playerName }) {
                     <p style={{ marginTop: '0.75rem', fontSize: '0.9rem', fontWeight: 700, color: 'var(--accent-green)' }}>
                       +{myLastResult.gameScore || 0} points
                     </p>
-                    {spotifyTrack && <SpotifyPlayer track={spotifyTrack} autoConsent={false} />}
+                    <SearchLinks links={myLastResult.searchLinks} />
                   </div>
                 ) : (
                   <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '1rem 0' }}>
