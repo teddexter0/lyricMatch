@@ -165,6 +165,7 @@ export default function GameBoard({ roomId, playerName }) {
     });
 
     socket.on('new-round', ({ letter, word, letterIndex, timer: t }) => {
+      setGameStarted(true);
       setCurrentLetterIndex(letterIndex);
       setCurrentWord(word);
       setTimer(t);
