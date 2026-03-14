@@ -22,10 +22,34 @@ const rooms = {};
 // Word pool (loaded once at startup via dynamic import workaround for ESM)
 let WORD_POOL = {};
 
-function getRandomWord(letter) {
-  const pool = WORD_POOL[letter] || [];
-  if (!pool.length) return letter.toLowerCase();
-  return pool[Math.floor(Math.random() * pool.length)];
+// Fisher-Yates shuffle — returns a new shuffled copy
+function shuffle(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+// Build per-letter shuffled queues so words don't repeat until the pool is exhausted
+function buildLetterQueues() {
+  const queues = {};
+  for (const letter of ALPHABET) {
+    const pool = WORD_POOL[letter] || [];
+    queues[letter] = pool.length > 0 ? shuffle(pool) : [letter.toLowerCase()];
+  }
+  return queues;
+}
+
+// Pop next word for a letter, reshuffling when the queue is empty
+function nextWord(room, letter) {
+  const q = room.letterQueues[letter];
+  if (!q || q.length === 0) {
+    const pool = WORD_POOL[letter] || [];
+    room.letterQueues[letter] = pool.length > 0 ? shuffle(pool) : [letter.toLowerCase()];
+  }
+  return room.letterQueues[letter].pop();
 }
 
 app.prepare().then(async () => {
@@ -59,13 +83,17 @@ app.prepare().then(async () => {
           players: {},
           scores: {},
           submissions: {},       // { playerName: { lyric, artist, result } }
+          skipped: {},           // { playerName: true } — skipped this round
           currentLetterIndex: 0,
           currentWord: '',
           timer: ROUND_TIME,
           timerInterval: null,
           isActive: false,
           gameStarted: false,
+          isPaused: false,
+          pausedAt: null,        // timer value when paused
           winner: null,
+          letterQueues: buildLetterQueues(),
         };
       }
 
@@ -97,8 +125,8 @@ app.prepare().then(async () => {
     // ── Submit lyric ─────────────────────────────────────────────────────────
     socket.on('submit-lyric', ({ roomId, playerName, lyric, artist }) => {
       const room = rooms[roomId];
-      if (!room || !room.isActive) return;
-      if (room.submissions[playerName]) return; // already submitted
+      if (!room || !room.isActive || room.isPaused) return;
+      if (room.submissions[playerName] || room.skipped[playerName]) return; // already acted
 
       room.submissions[playerName] = { lyric, artist, pending: true };
       io.to(roomId).emit('submission-received', { playerName });
@@ -112,6 +140,91 @@ app.prepare().then(async () => {
         roomId,
         playerName,
       });
+    });
+
+    // ── Skip turn ────────────────────────────────────────────────────────────
+    socket.on('skip-turn', ({ roomId, playerName }) => {
+      const room = rooms[roomId];
+      if (!room || !room.isActive || room.isPaused) return;
+      if (room.submissions[playerName] || room.skipped[playerName]) return;
+
+      room.skipped[playerName] = true;
+      // Treat as 0-score submission so round-end logic still works
+      room.submissions[playerName] = { lyric: '', artist: '', result: { confidence: 0, gameScore: 0, lyricMatch: false, wordMatch: false, reasoning: 'Skipped.' }, pending: false };
+      io.to(roomId).emit('player-skipped', { playerName });
+      io.to(roomId).emit('player-scored', { playerName, pts: 0, result: room.submissions[playerName].result });
+      io.to(roomId).emit('room-update', buildRoomState(room));
+
+      const allIn = Object.keys(room.players).every(
+        (p) => (room.submissions[p] && !room.submissions[p].pending) || room.skipped[p]
+      );
+      if (allIn) endRound(io, room, roomId);
+    });
+
+    // ── Forfeit game ─────────────────────────────────────────────────────────
+    socket.on('forfeit', ({ roomId, playerName }) => {
+      const room = rooms[roomId];
+      if (!room) return;
+
+      delete room.players[playerName];
+      io.to(roomId).emit('player-forfeited', { playerName });
+      io.to(roomId).emit('room-update', buildRoomState(room));
+
+      // If nobody left, clean up
+      if (Object.keys(room.players).length === 0) {
+        clearInterval(room.timerInterval);
+        delete rooms[roomId];
+        return;
+      }
+
+      // If only one player remains, they win
+      const remaining = Object.keys(room.players);
+      if (remaining.length === 1 && room.gameStarted) {
+        clearInterval(room.timerInterval);
+        room.winner = remaining[0];
+        io.to(roomId).emit('game-complete', { winner: room.winner, scores: room.scores });
+        return;
+      }
+
+      // Check if all remaining players have submitted
+      const allIn = remaining.every(
+        (p) => (room.submissions[p] && !room.submissions[p].pending) || room.skipped[p]
+      );
+      if (allIn) endRound(io, room, roomId);
+    });
+
+    // ── Pause game ───────────────────────────────────────────────────────────
+    socket.on('pause-game', ({ roomId }) => {
+      const room = rooms[roomId];
+      if (!room || !room.gameStarted || room.isPaused || !room.isActive) return;
+
+      room.isPaused = true;
+      room.pausedAt = room.timer;
+      clearInterval(room.timerInterval);
+      io.to(roomId).emit('game-paused', { timer: room.timer });
+      io.to(roomId).emit('room-update', buildRoomState(room));
+    });
+
+    // ── Resume game ──────────────────────────────────────────────────────────
+    socket.on('resume-game', ({ roomId }) => {
+      const room = rooms[roomId];
+      if (!room || !room.isPaused) return;
+
+      room.isPaused = false;
+      room.timer = room.pausedAt ?? room.timer;
+      io.to(roomId).emit('game-resumed', { timer: room.timer });
+      io.to(roomId).emit('room-update', buildRoomState(room));
+
+      // Restart the countdown
+      clearInterval(room.timerInterval);
+      room.timerInterval = setInterval(() => {
+        room.timer -= 1;
+        io.to(roomId).emit('timer-update', { timer: room.timer });
+        if (room.timer <= 0) {
+          clearInterval(room.timerInterval);
+          endRound(io, room, roomId);
+        }
+      }, 1000);
     });
 
     // ── Receive analysis result (client relays Gemini result back) ───────────
@@ -132,8 +245,11 @@ app.prepare().then(async () => {
       io.to(roomId).emit('player-scored', { playerName, pts, result });
       io.to(roomId).emit('room-update', buildRoomState(room));
 
-      // If all players have submitted, end round early
-      const allIn = Object.keys(room.players).every((p) => room.submissions[p] && !room.submissions[p].pending);
+      // If all remaining players have submitted/skipped, end round early
+      const remaining = Object.keys(room.players);
+      const allIn = remaining.every(
+        (p) => (room.submissions[p] && !room.submissions[p].pending) || room.skipped[p]
+      );
       if (allIn) endRound(io, room, roomId);
     });
 
@@ -156,9 +272,11 @@ app.prepare().then(async () => {
 
   function startRound(io, room, roomId) {
     const letter = ALPHABET[room.currentLetterIndex];
-    room.currentWord = getRandomWord(letter);
+    room.currentWord = nextWord(room, letter);
     room.submissions = {};
+    room.skipped = {};
     room.timer = ROUND_TIME;
+    room.isPaused = false;
 
     io.to(roomId).emit('new-round', {
       letter,
@@ -170,6 +288,7 @@ app.prepare().then(async () => {
 
     clearInterval(room.timerInterval);
     room.timerInterval = setInterval(() => {
+      if (room.isPaused) return; // skip tick while paused (belt-and-suspenders)
       room.timer -= 1;
       io.to(roomId).emit('timer-update', { timer: room.timer });
 
@@ -190,6 +309,7 @@ app.prepare().then(async () => {
     });
 
     setTimeout(() => {
+      if (!rooms[roomId]) return; // room may have been cleaned up
       if (room.currentLetterIndex >= ALPHABET.length - 1) {
         // Game over
         const winner = Object.entries(room.scores).sort(([, a], [, b]) => b - a)[0];
@@ -215,6 +335,7 @@ app.prepare().then(async () => {
       timer: room.timer,
       gameStarted: room.gameStarted,
       isActive: room.isActive,
+      isPaused: room.isPaused,
       winner: room.winner,
     };
   }

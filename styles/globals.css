@@ -25,6 +25,7 @@ html, body {
   background: var(--bg-primary);
   color: var(--text-primary);
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 16px;
   min-height: 100vh;
   overflow-x: hidden;
 }
@@ -207,8 +208,8 @@ html, body {
   background: rgba(29, 185, 84, 0.15);
   border: 1px solid rgba(29, 185, 84, 0.3);
   border-radius: 999px;
-  padding: 0.25rem 0.75rem;
-  font-size: 0.85rem;
+  padding: 0.3rem 0.9rem;
+  font-size: 0.9rem;
   font-weight: 700;
   color: var(--accent-green);
 }
@@ -222,13 +223,13 @@ html, body {
 }
 
 .letter-dot {
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   font-weight: 700;
   transition: all 0.3s;
 }
@@ -260,14 +261,14 @@ html, body {
 }
 
 .rank-badge {
-  width: 32px;
-  height: 32px;
+  width: 34px;
+  height: 34px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
   font-weight: 800;
-  font-size: 0.85rem;
+  font-size: 0.9rem;
   flex-shrink: 0;
 }
 
@@ -319,6 +320,83 @@ html, body {
 
 .slide-in-right { animation: slideInRight 0.4s ease forwards; }
 
+/* ── DYK / facts popup ── */
+.dyk-popup {
+  position: fixed;
+  bottom: 1.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(18, 18, 30, 0.97);
+  backdrop-filter: blur(24px);
+  border: 1px solid rgba(139, 92, 246, 0.5);
+  border-radius: 16px;
+  padding: 1.1rem 1.5rem;
+  max-width: 480px;
+  width: calc(100% - 3rem);
+  z-index: 1000;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.6), var(--glow-purple);
+  animation: fadeInUp 0.35s ease forwards;
+}
+
+.dyk-popup-close {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.75rem;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+/* ── Pause overlay ── */
+.pause-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 10, 15, 0.88);
+  backdrop-filter: blur(12px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 900;
+  animation: fadeInUp 0.25s ease forwards;
+}
+
+/* ── Skip / forfeit buttons ── */
+.btn-ghost {
+  background: transparent;
+  border: 1px solid rgba(255,255,255,0.15);
+  color: var(--text-muted);
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 0.5rem 1.2rem;
+  cursor: pointer;
+  font-size: 0.875rem;
+  transition: background 0.15s, color 0.15s;
+}
+
+.btn-ghost:hover {
+  background: rgba(255,255,255,0.08);
+  color: var(--text-primary);
+}
+
+.btn-danger {
+  background: transparent;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: #ef4444;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 0.5rem 1.2rem;
+  cursor: pointer;
+  font-size: 0.875rem;
+  transition: background 0.15s;
+}
+
+.btn-danger:hover {
+  background: rgba(239, 68, 68, 0.1);
+}
+
 /* ── Responsive ── */
 @media (max-width: 768px) {
   .letter-display { font-size: 5rem; }
@@ -358,9 +436,9 @@ html, body {
 
   /* Alphabet track — smaller dots */
   .letter-dot {
-    width: 22px;
-    height: 22px;
-    font-size: 0.6rem;
+    width: 24px;
+    height: 24px;
+    font-size: 0.65rem;
   }
 
   /* Game board 2-col grid → 1-col */
