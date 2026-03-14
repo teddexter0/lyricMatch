@@ -29,9 +29,10 @@ export default async function handler(req, res) {
     const analysis = await analyzeLyric({ lyricFragment, artistHint: artistHint || '', promptWord });
 
     const letterScore = LETTER_SCORES[letter.toUpperCase()] || 1;
+    const confidence = Number.isFinite(analysis.confidence) ? analysis.confidence : 0;
     const wordBonus = analysis.wordMatch ? 1.5 : 1;
     const artistBonus = analysis.confirmedArtist ? 1.2 : 1;
-    const gameScore = Math.round((analysis.confidence / 100) * letterScore * wordBonus * artistBonus * 10);
+    const gameScore = Math.round((confidence / 100) * letterScore * wordBonus * artistBonus * 10);
 
     // Free search links — no API key, no rate limits
     const songQuery = [analysis.songTitle, analysis.confirmedArtist].filter(Boolean).join(' ')
