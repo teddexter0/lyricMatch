@@ -702,7 +702,7 @@ export default function GameBoard({ roomId, playerName }) {
             <div style={{ fontSize: '2.5rem', marginBottom: '0.75rem' }}>🏳</div>
             <h2 style={{ fontWeight: 800, fontSize: '1.5rem', marginBottom: '0.5rem' }}>Forfeit game?</h2>
             <p style={{ color: 'var(--text-muted)', marginBottom: '2rem', fontSize: '0.95rem' }}>
-              You'll leave the game and return to the home screen. Your score won't be saved.
+              You&apos;ll leave the game and return to the home screen. Your score won&apos;t be saved.
             </p>
             <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center' }}>
               <button className="btn-danger" onClick={confirmForfeit}>Yes, forfeit</button>
